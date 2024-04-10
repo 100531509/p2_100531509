@@ -2,6 +2,136 @@
 
 //  MSH main file
 // Write your msh source code here
+void execute_simple_command(char ***argvv, int in_background) {
+    pid_t pid = fork();
+    if (pid == 0) { // Child
+        execvp(argvv[0][0], argvv[0]);
+        perror("execvp failed");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) { // Parent
+        if (!in_background) {
+            wait(NULL); // Wait for the child to finish if not in background
+        } else {
+            printf("[%d]\n", pid); // Print PID for background process
+        }
+    } else {
+        perror("fork failed");
+    }
+}
+
+void setup_redirection(char *filev[3]) {
+    if (strcmp(filev[0], "0") != 0) { // Input redirection
+        int fd_in = open(filev[0], O_RDONLY);
+        dup2(fd_in, STDIN_FILENO);
+        close(fd_in);
+    }
+    if (strcmp(filev[1], "0") != 0) { // Output redirection
+        int fd_out = open(filev[1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        dup2(fd_out, STDOUT_FILENO);
+        close(fd_out);
+    }
+    if (strcmp(filev[2], "0") != 0) { // Error redirection
+        int fd_err = open(filev[2], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        dup2(fd_err, STDERR_FILENO);
+        close(fd_err);
+    }
+}
+
+void execute_command_sequence(char ***argvv, int num_commands, char *filev[3], int in_background) {
+    int pipefds[2 * (num_commands - 1)];
+    for (int i = 0; i < num_commands - 1; i++) {
+        if (pipe(pipefds + i * 2) < 0) {
+            perror("Couldn't Pipe");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    int pid;
+    for (int i = 0; i < num_commands; i++) {
+        pid = fork();
+        if (pid == 0) {
+            // If not the first command, get input from the previous pipe
+            if (i != 0) {
+                dup2(pipefds[(i - 1) * 2], STDIN_FILENO);
+            }
+            // If not the last command, output to the next pipe
+            if (i != num_commands - 1) {
+                dup2(pipefds[i * 2 + 1], STDOUT_FILENO);
+            }
+            // Close all pipe fds
+            for (int j = 0; j < 2 * (num_commands - 1); j++) {
+                close(pipefds[j]);
+            }
+            execvp(argvv[i][0], argvv[i]);
+            exit(EXIT_FAILURE);
+        } else if (pid < 0) {
+            perror("fork failed");
+            exit(EXIT_FAILURE);
+        }
+    }
+    // Parent closes all of its copies at the end
+    for (int i = 0; i < 2 * (num_commands - 1); i++) {
+        close(pipefds[i]);
+    }
+    // Wait for children to exit if not in background
+    if (!in_background) {
+        for (int i = 0; i < num_commands; i++) {
+            wait(NULL);
+        }
+    }
+}
+
+void execute_mycalc(char **args) {
+    if (!args[1] || !args[2] || !args[3]) {
+        printf("[ERROR] Usage: mycalc <operand1> <add|mul|div> <operand2>\n");
+        return;
+    }
+
+    int op1 = atoi(args[1]);
+    int op2 = atoi(args[3]);
+    int result;
+
+    if (strcmp(args[2], "add") == 0) {
+        result = op1 + op2;
+        printf("[OK] %d + %d = %d\n", op1, op2, result);
+        // Update Acc environment variable if needed
+    } else if (strcmp(args[2], "mul") == 0) {
+        result = op1 * op2;
+        printf("[OK] %d * %d = %d\n", op1, op2, result);
+    } else if (strcmp(args[2], "div") == 0) {
+        if (op2 == 0) {
+            printf("[ERROR] Division by zero\n");
+            return;
+        }
+        int quotient = op1 / op2;
+        int remainder = op1 % op2;
+        printf("[OK] %d / %d = %d; Remainder %d\n", op1, op2, quotient, remainder);
+    } else {
+        printf("[ERROR] Invalid operation\n");
+    }
+}
+
+#define HISTORY_SIZE 20
+struct command history[HISTORY_SIZE];
+int history_count = 0;
+
+void execute_myhistory(char **args) {
+    if (args[1]) {
+        int cmd_number = atoi(args[1]);
+        // Validate cmd_number and execute the command from history
+        printf("Running command %d: %s\n", cmd_number, history[cmd_number].cmd);
+    } else {
+        // List last 20 commands
+        for (int i = 0; i < history_count; i++) {
+            printf("%d %s\n", i, history[i].cmd);
+        }
+    }
+}
+
+void add_to_history(char ***argvv, char **filev, int in_background) {
+    // Add the command to the history array
+}
+
 
 //#include "parser.h"
 #include <stddef.h>			/* NULL */
