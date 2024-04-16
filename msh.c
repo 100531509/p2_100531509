@@ -171,7 +171,7 @@ void mycalc(char *args[], int num_args)
     // Ensure the number of arguments is correct
     if (num_args != 4)
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand 1> <add/mul/div> <operand 2>\n");
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
         return;
     }
 
@@ -183,7 +183,7 @@ void mycalc(char *args[], int num_args)
     // Validate input conversion - atoi returns 0 if conversion fails, which can be misleading if '0' is an operand
     if ((strcmp(args[1], "0") != 0 && operand1 == 0) || (strcmp(args[3], "0") != 0 && operand2 == 0))
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand 1> <add/mul/div> <operand 2>\n");
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
         return;
     }
 
@@ -371,16 +371,7 @@ void execute_history_item(int index)
     }
 
     int i = (head + index) % MAX_HISTORY;
-    printf("Running command %d");
-    for (int j = 0; j < history[i].num_commands; j++)
-    {
-        for (int k = 0; k < history[i].args[j]; k++)
-        {
-            printf("%s ", history[i].argvv[j][k]);
-        }
-        printf("| ");
-    }
-    printf("\n");
+    printf("Running command %d\n", index);
 
     // Execute the command based on its structure
     if (history[i].num_commands == 1)
