@@ -177,7 +177,7 @@ void mycalc(char *args[], int num_args)
     // Ensure the number of arguments is correct
     if (num_args != 4)
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
         return;
     }
 
@@ -189,7 +189,7 @@ void mycalc(char *args[], int num_args)
     // Validate input conversion - atoi returns 0 if conversion fails, which can be misleading if '0' is an operand
     if ((strcmp(args[1], "0") != 0 && operand1 == 0) || (strcmp(args[3], "0") != 0 && operand2 == 0))
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
         return;
     }
 
@@ -213,7 +213,7 @@ void mycalc(char *args[], int num_args)
     {
         if (operand2 == 0)
         {
-            fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
+            fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
             return;
         }
         result = operand1 / operand2;
@@ -222,7 +222,7 @@ void mycalc(char *args[], int num_args)
     }
     else
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
     }
 }
 
@@ -399,7 +399,7 @@ void execute_history_item(int index)
     }
     else
     {
-        fprintf(stderr, "Error: Unsupported number of commands.\n");
+        fprintf(stderr, "0 ERROR: Command not found\n");
     }
 }
 
