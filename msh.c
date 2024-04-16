@@ -18,6 +18,42 @@
 
 //  MSH main file
 // Write your msh source code here
+
+// files in case of redirection
+char filev[3][64];
+
+// to store the execvp second parameter
+char *argv_execvp[8];
+
+void siginthandler(int param)
+{
+    printf("****  Exiting MSH **** \n");
+    // signal(SIGINT, siginthandler);
+    exit(0);
+}
+
+#define MAX_HISTORY 20
+
+struct command
+{
+    // Store the number of commands in argvv
+    int num_commands;
+    // Store the number of arguments of each command
+    int *args;
+    // Store the commands
+    char ***argvv;
+    // Store the I/O redirection
+    char filev[3][64];
+    // Store if the command is executed in background or foreground
+    int in_background;
+};
+
+int history_size = 20;
+struct command *history;
+int head = 0;
+int tail = 0;
+int n_elem = 0;
+
 void execute_command(char *argv[], char *input_file, char *output_file, char *error_file, int background)
 {
     int pid, status;
@@ -88,35 +124,25 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
     }
 }
 
-void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
+void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[], char *input_file, char *output_file, char *error_file, int background)
 {
-    int pipe1[2], pipe2[2];
-    pid_t pid1, pid2, pid3;
-
-    // Create the first pipe
+    int pipe1[2], pipe2[2], pid1, pid2, pid3;
     if (pipe(pipe1) < 0)
     {
         perror("pipe1 failed");
         exit(EXIT_FAILURE);
     }
-
-    // First command
     pid1 = fork();
-    if (pid1 == 0) // Child process for the first command
-    {
+    if (pid1 == 0)
+    { // First command
         if (cmd2 != NULL)
-        {                                  // Only redirect if there's a second command
-            dup2(pipe1[1], STDOUT_FILENO); // Redirect stdout to pipe1 write-end
-        }
-        close(pipe1[0]); // Close unused read end
-        close(pipe1[1]); // Close write end after dup
-
+            dup2(pipe1[1], STDOUT_FILENO);
+        close(pipe1[0]);
+        close(pipe1[1]);
         execvp(cmd1[0], cmd1);
         perror("execvp cmd1 failed");
         exit(EXIT_FAILURE);
     }
-
-    // Second command (if present)
     if (cmd2 != NULL)
     {
         if (pipe(pipe2) < 0)
@@ -124,20 +150,16 @@ void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
             perror("pipe2 failed");
             exit(EXIT_FAILURE);
         }
-
         pid2 = fork();
-        if (pid2 == 0) // Child process for the second command
-        {
-            dup2(pipe1[0], STDIN_FILENO); // Redirect stdin to pipe1 read-end
+        if (pid2 == 0)
+        { // Second command
+            dup2(pipe1[0], STDIN_FILENO);
             if (cmd3 != NULL)
-            {                                  // Only redirect if there's a third command
-                dup2(pipe2[1], STDOUT_FILENO); // Redirect stdout to pipe2 write-end
-            }
+                dup2(pipe2[1], STDOUT_FILENO);
             close(pipe1[1]);
             close(pipe1[0]);
             close(pipe2[0]);
             close(pipe2[1]);
-
             execvp(cmd2[0], cmd2);
             perror("execvp cmd2 failed");
             exit(EXIT_FAILURE);
@@ -145,17 +167,14 @@ void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
     }
     close(pipe1[0]);
     close(pipe1[1]);
-
-    // Third command (if present)
     if (cmd3 != NULL)
     {
         pid3 = fork();
-        if (pid3 == 0) // Child process for the third command
-        {
-            dup2(pipe2[0], STDIN_FILENO); // Redirect stdin to pipe2 read-end
+        if (pid3 == 0)
+        { // Third command
+            dup2(pipe2[0], STDIN_FILENO);
             close(pipe2[1]);
             close(pipe2[0]);
-
             execvp(cmd3[0], cmd3);
             perror("execvp cmd3 failed");
             exit(EXIT_FAILURE);
@@ -163,10 +182,11 @@ void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
         close(pipe2[0]);
         close(pipe2[1]);
     }
-
-    // Parent process waits for all child processes to finish
-    while (wait(NULL) > 0)
-        ;
+    if (!background)
+        while (wait(NULL) > 0)
+            ; // Wait for all children if not in background
+    else
+        printf("Started background process PID: %d\n", pid1);
 }
 
 // Global accumulator
@@ -225,44 +245,6 @@ void mycalc(char *args[], int num_args)
         fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
     }
 }
-
-// files in case of redirection
-char filev[3][64];
-
-// to store the execvp second parameter
-char *argv_execvp[8];
-
-void siginthandler(int param)
-{
-    printf("****  Exiting MSH **** \n");
-    // signal(SIGINT, siginthandler);
-    exit(0);
-}
-
-/* myhistory */
-
-/* myhistory */
-#define MAX_HISTORY 20
-
-struct command
-{
-    // Store the number of commands in argvv
-    int num_commands;
-    // Store the number of arguments of each command
-    int *args;
-    // Store the commands
-    char ***argvv;
-    // Store the I/O redirection
-    char filev[3][64];
-    // Store if the command is executed in background or foreground
-    int in_background;
-};
-
-int history_size = 20;
-struct command *history;
-int head = 0;
-int tail = 0;
-int n_elem = 0;
 
 void free_command(struct command *cmd)
 {
@@ -390,11 +372,11 @@ void execute_history_item(int index)
         // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
         if (history[i].num_commands == 2)
         {
-            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], NULL);
+            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], NULL, history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
         }
         else if (history[i].num_commands == 3)
         {
-            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], history[i].argvv[2]);
+            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], history[i].argvv[2], history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
         }
     }
     else
@@ -535,11 +517,11 @@ int main(int argc, char *argv[])
                 // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
                 if (command_counter == 2)
                 {
-                    execute_command_sequence(argvv[0], argvv[1], NULL);
+                    execute_command_sequence(argvv[0], argvv[1], NULL, filev[0], filev[1], filev[2], in_background);
                 }
                 else if (command_counter == 3)
                 {
-                    execute_command_sequence(argvv[0], argvv[1], argvv[2]);
+                    execute_command_sequence(argvv[0], argvv[1], argvv[2], filev[0], filev[1], filev[2], in_background);
                 }
             }
             else
