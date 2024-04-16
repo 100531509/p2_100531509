@@ -213,7 +213,7 @@ void mycalc(char *args[], int num_args)
     {
         if (operand2 == 0)
         {
-            fprintf(stderr, "[ERROR] Division by zero is not allowed.\n");
+            fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
             return;
         }
         result = operand1 / operand2;
@@ -222,7 +222,7 @@ void mycalc(char *args[], int num_args)
     }
     else
     {
-        fprintf(stderr, "[ERROR] Invalid operator '%s'. Valid operators are: 'add', 'mul', 'div'.\n", operation);
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>");
     }
 }
 
