@@ -88,92 +88,85 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
     }
 }
 
-void execute_command_sequence(char ***argvv, char *filev[], int num_commands, int background)
+void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
 {
-    int i, in_fd = 0, fd[2], out_fd, err_fd;
+    int pipe1[2], pipe2[2];
+    pid_t pid1, pid2, pid3;
 
-    // Handle input redirection
-    if (filev[0] && strcmp(filev[0], "0") != 0)
+    // Create the first pipe
+    if (pipe(pipe1) < 0)
     {
-        in_fd = open(filev[0], O_RDONLY);
-        if (in_fd < 0)
-        {
-            perror("Failed to open input file");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    // Iterate over each command except the last one
-    for (i = 0; i < num_commands - 1; ++i)
-    {
-        pipe(fd); // Create a pipe between the commands
-
-        // Fork and execute the command
-        if (fork() == 0)
-        {
-            dup2(in_fd, STDIN_FILENO);  // Redirect input
-            dup2(fd[1], STDOUT_FILENO); // Redirect output to next command
-            close(fd[0]);               // Close unused read end
-
-            execvp(argvv[i][0], argvv[i]);
-            perror("execvp");
-            exit(EXIT_FAILURE);
-        }
-
-        close(fd[1]);  // Close write end in the parent
-        close(in_fd);  // Close the previous input fd
-        in_fd = fd[0]; // Use read end of the pipe as input for the next command
-    }
-
-    // Handle output and error redirection for the last command
-    if (filev[1] && strcmp(filev[1], "0") != 0)
-    {
-        out_fd = open(filev[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (out_fd < 0)
-        {
-            perror("Failed to open output file");
-            exit(EXIT_FAILURE);
-        }
-    }
-    else
-    {
-        out_fd = STDOUT_FILENO;
-    }
-
-    if (filev[2] && strcmp(filev[2], "0") != 0)
-    {
-        err_fd = open(filev[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (err_fd < 0)
-        {
-            perror("Failed to open error file");
-            exit(EXIT_FAILURE);
-        }
-    }
-    else
-    {
-        err_fd = STDERR_FILENO;
-    }
-
-    if (fork() == 0)
-    {
-        dup2(in_fd, STDIN_FILENO);
-        dup2(out_fd, STDOUT_FILENO);
-        dup2(err_fd, STDERR_FILENO);
-        execvp(argvv[i][0], argvv[i]);
-        perror("execvp final command");
+        perror("pipe1 failed");
         exit(EXIT_FAILURE);
     }
 
-    if (!background)
+    // First command
+    pid1 = fork();
+    if (pid1 == 0) // Child process for the first command
     {
-        while (wait(NULL) > 0)
-            ; // Wait for all child processes if not in background
+        if (cmd2 != NULL)
+        {                                  // Only redirect if there's a second command
+            dup2(pipe1[1], STDOUT_FILENO); // Redirect stdout to pipe1 write-end
+        }
+        close(pipe1[0]); // Close unused read end
+        close(pipe1[1]); // Close write end after dup
+
+        execvp(cmd1[0], cmd1);
+        perror("execvp cmd1 failed");
+        exit(EXIT_FAILURE);
     }
 
-    // Close file descriptors
-    close(in_fd);
-    close(out_fd);
-    close(err_fd);
+    // Second command (if present)
+    if (cmd2 != NULL)
+    {
+        if (pipe(pipe2) < 0)
+        {
+            perror("pipe2 failed");
+            exit(EXIT_FAILURE);
+        }
+
+        pid2 = fork();
+        if (pid2 == 0) // Child process for the second command
+        {
+            dup2(pipe1[0], STDIN_FILENO); // Redirect stdin to pipe1 read-end
+            if (cmd3 != NULL)
+            {                                  // Only redirect if there's a third command
+                dup2(pipe2[1], STDOUT_FILENO); // Redirect stdout to pipe2 write-end
+            }
+            close(pipe1[1]);
+            close(pipe1[0]);
+            close(pipe2[0]);
+            close(pipe2[1]);
+
+            execvp(cmd2[0], cmd2);
+            perror("execvp cmd2 failed");
+            exit(EXIT_FAILURE);
+        }
+    }
+    close(pipe1[0]);
+    close(pipe1[1]);
+
+    // Third command (if present)
+    if (cmd3 != NULL)
+    {
+        pid3 = fork();
+        if (pid3 == 0) // Child process for the third command
+        {
+            dup2(pipe2[0], STDIN_FILENO); // Redirect stdin to pipe2 read-end
+            close(pipe2[1]);
+            close(pipe2[0]);
+
+            execvp(cmd3[0], cmd3);
+            perror("execvp cmd3 failed");
+            exit(EXIT_FAILURE);
+        }
+        close(pipe2[0]);
+        close(pipe2[1]);
+    }
+
+    // Parent process waits for all child processes to finish
+    while (wait(NULL) > 0)
+        ;
 }
 
 // Global accumulator
