@@ -120,73 +120,96 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
     }
     else
     {
-        printf("Started background process PID: %d\n", pid);
+        fprintf(stderr, "Started background process PID: %d\n", pid); // Using fprintf with stderr
     }
 }
 
-void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[], char *input_file, char *output_file, char *error_file, int background)
+void execute_command_sequence(char ***commands, int num_commands, char *input_file, char *output_file, char *error_file, int background)
 {
-    int pipe1[2], pipe2[2], pid1, pid2, pid3;
-    if (pipe(pipe1) < 0)
+    int **pipes = malloc((num_commands - 1) * sizeof(int *));
+    int i = 0;
+    pid_t pid;
+    int in_fd = 0, out_fd = 1;
+
+    // Set up all needed pipes in advance
+    for (i = 0; i < num_commands - 1; i++)
     {
-        perror("pipe1 failed");
-        exit(EXIT_FAILURE);
+        pipes[i] = malloc(2 * sizeof(int));
+        pipe(pipes[i]);
     }
-    pid1 = fork();
-    if (pid1 == 0)
-    { // First command
-        if (cmd2 != NULL)
-            dup2(pipe1[1], STDOUT_FILENO);
-        close(pipe1[0]);
-        close(pipe1[1]);
-        execvp(cmd1[0], cmd1);
-        perror("execvp cmd1 failed");
-        exit(EXIT_FAILURE);
-    }
-    if (cmd2 != NULL)
+
+    for (i = 0; i < num_commands; i++)
     {
-        if (pipe(pipe2) < 0)
+        pid = fork();
+        if (pid == 0)
         {
-            perror("pipe2 failed");
-            exit(EXIT_FAILURE);
-        }
-        pid2 = fork();
-        if (pid2 == 0)
-        { // Second command
-            dup2(pipe1[0], STDIN_FILENO);
-            if (cmd3 != NULL)
-                dup2(pipe2[1], STDOUT_FILENO);
-            close(pipe1[1]);
-            close(pipe1[0]);
-            close(pipe2[0]);
-            close(pipe2[1]);
-            execvp(cmd2[0], cmd2);
-            perror("execvp cmd2 failed");
+            // Redirect input from the previous pipe if not the first command
+            if (i > 0)
+            {
+                dup2(pipes[i - 1][0], STDIN_FILENO);
+            }
+            else if (input_file && strcmp(input_file, "0") != 0)
+            {
+                // Handle input redirection for the first command
+                in_fd = open(input_file, O_RDONLY);
+                if (in_fd == -1)
+                {
+                    perror("Failed to open input file");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(in_fd, STDIN_FILENO);
+                close(in_fd);
+            }
+
+            // Redirect output to the next pipe if not the last command
+            if (i < num_commands - 1)
+            {
+                dup2(pipes[i][1], STDOUT_FILENO);
+            }
+            else if (output_file && strcmp(output_file, "0") != 0)
+            {
+                // Handle output redirection for the last command
+                out_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (out_fd == -1)
+                {
+                    perror("Failed to open output file");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(out_fd, STDOUT_FILENO);
+                close(out_fd);
+            }
+
+            // Close all pipes in the child
+            for (int j = 0; j < num_commands - 1; j++)
+            {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            execvp(commands[i][0], commands[i]);
+            perror("execvp");
             exit(EXIT_FAILURE);
         }
     }
-    close(pipe1[0]);
-    close(pipe1[1]);
-    if (cmd3 != NULL)
+
+    // Parent closes all pipe ends
+    for (i = 0; i < num_commands - 1; i++)
     {
-        pid3 = fork();
-        if (pid3 == 0)
-        { // Third command
-            dup2(pipe2[0], STDIN_FILENO);
-            close(pipe2[1]);
-            close(pipe2[0]);
-            execvp(cmd3[0], cmd3);
-            perror("execvp cmd3 failed");
-            exit(EXIT_FAILURE);
-        }
-        close(pipe2[0]);
-        close(pipe2[1]);
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+        free(pipes[i]);
     }
+    free(pipes);
+
     if (!background)
+    {
         while (wait(NULL) > 0)
             ; // Wait for all children if not in background
+    }
     else
-        printf("Started background process PID: %d\n", pid1);
+    {
+        printf("Background execution started for a pipeline of %d commands.\n", num_commands);
+    }
 }
 
 // Global accumulator
@@ -197,7 +220,7 @@ void mycalc(char *args[], int num_args)
     // Ensure the number of arguments is correct
     if (num_args != 4)
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
+        printf("[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
         return;
     }
 
@@ -209,7 +232,7 @@ void mycalc(char *args[], int num_args)
     // Validate input conversion - atoi returns 0 if conversion fails, which can be misleading if '0' is an operand
     if ((strcmp(args[1], "0") != 0 && operand1 == 0) || (strcmp(args[3], "0") != 0 && operand2 == 0))
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
+        printf("[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
         return;
     }
 
@@ -233,7 +256,7 @@ void mycalc(char *args[], int num_args)
     {
         if (operand2 == 0)
         {
-            fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
+            printf("[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
             return;
         }
         result = operand1 / operand2;
@@ -242,7 +265,7 @@ void mycalc(char *args[], int num_args)
     }
     else
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
+        printf("[ERROR] The structure of the command is mycalc <operand_1> <add/mul/div> <operand_2>\n");
     }
 }
 
@@ -332,19 +355,19 @@ void display_history()
     int index = head;
     while (count < n_elem)
     {
-        printf("%d ", count + 1);
+        fprintf(stderr, "%d ", count); // Outputting to stderr and starting from 0
         for (int j = 0; j < history[index].num_commands; j++)
         {
             for (int k = 0; k < history[index].args[j]; k++)
             {
-                printf("%s ", history[index].argvv[j][k]);
+                fprintf(stderr, "%s ", history[index].argvv[j][k]); // Outputting to stderr
             }
             if (j < history[index].num_commands - 1)
             {
-                printf("| ");
+                fprintf(stderr, "| "); // Outputting to stderr
             }
         }
-        printf("\n");
+        fprintf(stderr, "\n"); // Outputting to stderr
         index = (index + 1) % MAX_HISTORY;
         count++;
     }
@@ -359,7 +382,7 @@ void execute_history_item(int index)
     }
 
     int i = (head + index) % MAX_HISTORY;
-    printf("Running command %d\n", index);
+    fprintf(stderr, "Running command %d\n", index);
 
     // Execute the command based on its structure
     if (history[i].num_commands == 1)
@@ -369,19 +392,26 @@ void execute_history_item(int index)
     }
     else if (history[i].num_commands > 1 && history[i].num_commands <= 3)
     {
-        // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
-        if (history[i].num_commands == 2)
+        // Assuming you are in a function where 'i' indexes into a history or similar structure
+        if (history[i].num_commands >= 2)
         {
-            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], NULL, history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
-        }
-        else if (history[i].num_commands == 3)
-        {
-            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], history[i].argvv[2], history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
+            // Array to hold command pointers
+            char ***commands = malloc(history[i].num_commands * sizeof(char **));
+            for (int j = 0; j < history[i].num_commands; j++)
+            {
+                commands[j] = history[i].argvv[j];
+            }
+
+            // Call the updated execute_command_sequence function
+            execute_command_sequence(commands, history[i].num_commands, history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
+
+            // Free the temporary array after use
+            free(commands);
         }
     }
     else
     {
-        fprintf(stderr, "0 ERROR: Command not found\n");
+        printf("ERROR: Command not found\n");
     }
 }
 
@@ -514,14 +544,20 @@ int main(int argc, char *argv[])
             }
             else if (command_counter > 1 && command_counter <= 3)
             {
-                // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
-                if (command_counter == 2)
+                if (command_counter >= 2)
                 {
-                    execute_command_sequence(argvv[0], argvv[1], NULL, filev[0], filev[1], filev[2], in_background);
-                }
-                else if (command_counter == 3)
-                {
-                    execute_command_sequence(argvv[0], argvv[1], argvv[2], filev[0], filev[1], filev[2], in_background);
+                    // Array to hold command pointers for dynamic command sequence execution
+                    char ***commands = malloc(command_counter * sizeof(char **));
+                    for (int j = 0; j < command_counter; j++)
+                    {
+                        commands[j] = argvv[j];
+                    }
+
+                    // Call the updated execute_command_sequence function
+                    execute_command_sequence(commands, command_counter, filev[0], filev[1], filev[2], in_background);
+
+                    // Free the temporary array after use
+                    free(commands);
                 }
             }
             else
