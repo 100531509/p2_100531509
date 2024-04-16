@@ -27,9 +27,8 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
     if (pid == 0)
     {
         // Child process
-
         // Input redirection
-        if (input_file)
+        if (input_file && strcmp(input_file, "0") != 0)
         {
             in_fd = open(input_file, O_RDONLY);
             if (in_fd == -1)
@@ -42,7 +41,7 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
         }
 
         // Output redirection
-        if (output_file)
+        if (output_file && strcmp(output_file, "0") != 0)
         {
             out_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (out_fd == -1)
@@ -55,7 +54,7 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
         }
 
         // Error redirection
-        if (error_file)
+        if (error_file && strcmp(error_file, "0") != 0)
         {
             err_fd = open(error_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (err_fd == -1)
@@ -91,98 +90,120 @@ void execute_command(char *argv[], char *input_file, char *output_file, char *er
 
 void execute_command_sequence(char *cmd1[], char *cmd2[], char *cmd3[])
 {
-    int pipe1[2], pipe2[2]; // Two pipes
+    int pipe1[2], pipe2[2];
 
-    if (pipe(pipe1) == -1 || pipe(pipe2) == -1)
+    // Create the first pipe
+    if (pipe(pipe1) == -1)
     {
-        perror("pipe");
+        perror("pipe1 failed");
         exit(EXIT_FAILURE);
     }
 
-    // First child process
     if (fork() == 0)
     {
-        // Redirect stdout to pipe1 write end
+        // First child (write to pipe1)
         dup2(pipe1[1], STDOUT_FILENO);
         close(pipe1[0]); // Close unused read end
-        close(pipe1[1]); // Close write end after dup
+        close(pipe1[1]); // Not needed after dup
 
         execvp(cmd1[0], cmd1);
-        perror("execvp cmd1");
+        perror("execvp cmd1 failed");
         exit(EXIT_FAILURE);
     }
 
-    // Second child process
-    if (fork() == 0)
+    // Second command needs to be handled if it exists
+    if (cmd2 != NULL)
     {
-        // Redirect stdin to pipe1 read end
-        dup2(pipe1[0], STDIN_FILENO);
-        // Redirect stdout to pipe2 write end
-        dup2(pipe2[1], STDOUT_FILENO);
-        close(pipe1[1]); // Close unused write end
-        close(pipe1[0]); // Close read end after dup
-        close(pipe2[0]); // Close unused read end
-        close(pipe2[1]); // Close write end after dup
+        if (pipe(pipe2) == -1)
+        {
+            perror("pipe2 failed");
+            exit(EXIT_FAILURE);
+        }
 
-        execvp(cmd2[0], cmd2);
-        perror("execvp cmd2");
-        exit(EXIT_FAILURE);
+        if (fork() == 0)
+        {
+            // Second child (read from pipe1, write to pipe2)
+            dup2(pipe1[0], STDIN_FILENO);
+            dup2(pipe2[1], STDOUT_FILENO);
+            close(pipe1[1]);
+            close(pipe1[0]);
+            close(pipe2[0]);
+            close(pipe2[1]);
+
+            execvp(cmd2[0], cmd2);
+            perror("execvp cmd2 failed");
+            exit(EXIT_FAILURE);
+        }
     }
 
-    // Third child process
-    if (fork() == 0)
-    {
-        // Redirect stdin to pipe2 read end
-        dup2(pipe2[0], STDIN_FILENO);
-        close(pipe2[1]); // Close unused write end
-        close(pipe2[0]); // Close read end after dup
-
-        execvp(cmd3[0], cmd3);
-        perror("execvp cmd3");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parent closes all pipes and waits for children
     close(pipe1[0]);
     close(pipe1[1]);
-    close(pipe2[0]);
-    close(pipe2[1]);
 
-    // Wait for all child processes to finish
-    for (int i = 0; i < 3; i++)
+    // Handling the third command
+    if (cmd3 != NULL)
     {
-        wait(NULL);
+        if (fork() == 0)
+        {
+            // Third child (read from pipe2)
+            dup2(pipe2[0], STDIN_FILENO);
+            close(pipe2[1]);
+            close(pipe2[0]);
+
+            execvp(cmd3[0], cmd3);
+            perror("execvp cmd3 failed");
+            exit(EXIT_FAILURE);
+        }
+
+        close(pipe2[0]);
+        close(pipe2[1]);
     }
+
+    // Parent process waits for all child processes to finish
+    while (wait(NULL) > 0)
+        ;
 }
 
-// Initialize the accumulator
+// Global accumulator
 int acc = 0;
 
 void mycalc(char *args[], int num_args)
 {
+    // Ensure the number of arguments is correct
     if (num_args != 4)
     {
         fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand 1> <add/mul/div> <operand 2>\n");
         return;
     }
 
-    int operand1 = atoi(args[1]);
-    char *operator= args[2];
-    int operand2 = atoi(args[3]);
-    int result, remainder;
+    // Arguments parsing
+    int operand1 = atoi(args[1]); // Convert first argument to integer
+    char *operation = args[2];    // Operation to perform: add, mul, div
+    int operand2 = atoi(args[3]); // Convert second argument to integer
 
-    if (strcmp(operator, "add") == 0)
+    // Validate input conversion - atoi returns 0 if conversion fails, which can be misleading if '0' is an operand
+    if ((strcmp(args[1], "0") != 0 && operand1 == 0) || (strcmp(args[3], "0") != 0 && operand2 == 0))
+    {
+        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand 1> <add/mul/div> <operand 2>\n");
+        return;
+    }
+
+    // Calculation variables
+    int result = 0;
+    int remainder = 0;
+
+    // Determine operation based on operator string
+    if (strcmp(operation, "add") == 0)
     {
         result = operand1 + operand2;
-        acc += result; // Updating the accumulator with the result of addition
+        acc += result; // Update accumulator only on 'add'
         fprintf(stderr, "[OK] %d + %d = %d; Acc %d\n", operand1, operand2, result, acc);
     }
-    else if (strcmp(operator, "mul") == 0)
+    else if (strcmp(operation, "mul") == 0)
     {
         result = operand1 * operand2;
         fprintf(stderr, "[OK] %d * %d = %d\n", operand1, operand2, result);
     }
-    else if (strcmp(operator, "div") == 0)
+    else if (strcmp(operation, "div") == 0)
     {
         if (operand2 == 0)
         {
@@ -195,36 +216,9 @@ void mycalc(char *args[], int num_args)
     }
     else
     {
-        fprintf(stderr, "[ERROR] The structure of the command is mycalc <operand 1> <add/mul/div> <operand 2>\n");
+        fprintf(stderr, "[ERROR] Invalid operator '%s'. Valid operators are: 'add', 'mul', 'div'.\n", operation);
     }
 }
-
-// #define HISTORY_SIZE 20
-// struct command history[HISTORY_SIZE];
-// int history_count = 0;
-
-// void execute_myhistory(char **args)
-// {
-//     if (args[1])
-//     {
-//         int cmd_number = atoi(args[1]);
-//         // Validate cmd_number and execute the command from history
-//         printf("Running command %d: %s\n", cmd_number, history[cmd_number].cmd);
-//     }
-//     else
-//     {
-//         // List last 20 commands
-//         for (int i = 0; i < history_count; i++)
-//         {
-//             printf("%d %s\n", i, history[i].cmd);
-//         }
-//     }
-// }
-
-// void add_to_history(char ***argvv, char **filev, int in_background)
-// {
-//     // Add the command to the history array
-// }
 
 // files in case of redirection
 char filev[3][64];
@@ -242,6 +236,7 @@ void siginthandler(int param)
 /* myhistory */
 
 /* myhistory */
+#define MAX_HISTORY 20
 
 struct command
 {
@@ -326,6 +321,91 @@ void store_command(char ***argvv, char filev[3][64], int in_background, struct c
     }
 }
 
+void add_history_item(char ***argvv, char filev[3][64], int in_background)
+{
+    if (history == NULL)
+    {
+        history = (struct command *)malloc(MAX_HISTORY * sizeof(struct command));
+    }
+
+    struct command *cmd = &history[tail];
+    store_command(argvv, filev, in_background, cmd);
+
+    tail = (tail + 1) % MAX_HISTORY;
+    if (n_elem < MAX_HISTORY)
+    {
+        n_elem++;
+    }
+}
+
+void display_history()
+{
+    int count = 0;
+    int index = head;
+    while (count < n_elem)
+    {
+        printf("%d ", count + 1);
+        for (int j = 0; j < history[index].num_commands; j++)
+        {
+            for (int k = 0; k < history[index].args[j]; k++)
+            {
+                printf("%s ", history[index].argvv[j][k]);
+            }
+            if (j < history[index].num_commands - 1)
+            {
+                printf("| ");
+            }
+        }
+        printf("\n");
+        index = (index + 1) % MAX_HISTORY;
+        count++;
+    }
+}
+
+void execute_history_item(int index)
+{
+    if (index < 0 || index >= n_elem)
+    {
+        printf("ERROR: Command not found\n");
+        return;
+    }
+
+    int i = (head + index) % MAX_HISTORY;
+    printf("Running command %d");
+    for (int j = 0; j < history[i].num_commands; j++)
+    {
+        for (int k = 0; k < history[i].args[j]; k++)
+        {
+            printf("%s ", history[i].argvv[j][k]);
+        }
+        printf("| ");
+    }
+    printf("\n");
+
+    // Execute the command based on its structure
+    if (history[i].num_commands == 1)
+    {
+        // Handle single commands with no piping but potential redirection and background execution
+        execute_command(history[i].argvv[0], history[i].filev[0], history[i].filev[1], history[i].filev[2], history[i].in_background);
+    }
+    else if (history[i].num_commands > 1 && history[i].num_commands <= 3)
+    {
+        // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
+        if (history[i].num_commands == 2)
+        {
+            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], NULL);
+        }
+        else if (history[i].num_commands == 3)
+        {
+            execute_command_sequence(history[i].argvv[0], history[i].argvv[1], history[i].argvv[2]);
+        }
+    }
+    else
+    {
+        fprintf(stderr, "Error: Unsupported number of commands.\n");
+    }
+}
+
 /**
  * Get the command with its parameters for execvp
  * Execute this instruction before run an execvp to obtain the complete command
@@ -345,7 +425,7 @@ void getCompleteCommand(char ***argvv, int num_command)
 }
 
 /**
- * Main sheell  Loop
+ * Main shell Loop
  */
 int main(int argc, char *argv[])
 {
@@ -409,18 +489,72 @@ int main(int argc, char *argv[])
         //************************************************************************************************
 
         /************************ STUDENTS CODE ********************************/
-        if (command_counter > 0)
+        // Check for internal commands
+        if (strcmp(argvv[0][0], "myhistory") == 0)
         {
-            if (command_counter > MAX_COMMANDS)
+            int new_count = 0;
+            while (argvv[0][new_count] != NULL)
+                new_count++;
+            if (new_count == 1)
             {
-                printf("Error: Maximum number of commands is %d \n", MAX_COMMANDS);
+                display_history();
+            }
+            else if (new_count == 2)
+            {
+                int index = atoi(argvv[0][1]);
+                execute_history_item(index);
             }
             else
             {
-                // Print command
-                print_command(argvv, filev, in_background);
+                fprintf(stderr, "Usage: myhistory [<command_index>]\n");
+            }
+            continue;
+        }
+
+        // Add command to history
+        char *cmd_line = NULL;
+        asprintf(&cmd_line, "%s", argvv[0][0]);
+        add_history_item(argvv, filev, in_background);
+
+        if (strcmp(argvv[0][0], "mycalc") == 0)
+        {
+            // Ensure command_counter correctly counts all elements in argvv[0]
+            int arg_count = 0;
+            while (argvv[0][arg_count] != NULL)
+                arg_count++;
+            mycalc(argvv[0], arg_count);
+            continue;
+        }
+
+        if (command_counter > 0)
+        {
+            if (command_counter == 1)
+            {
+                // Handle single commands with no piping but potential redirection and background execution
+                execute_command(argvv[0], filev[0], filev[1], filev[2], in_background);
+            }
+            else if (command_counter > 1 && command_counter <= 3)
+            {
+                // Handle command sequences with piping, assuming num_commands reflects the number of piped segments
+                if (command_counter == 2)
+                {
+                    execute_command_sequence(argvv[0], argvv[1], NULL);
+                }
+                else if (command_counter == 3)
+                {
+                    execute_command_sequence(argvv[0], argvv[1], argvv[2]);
+                }
+            }
+            else
+            {
+                fprintf(stderr, "Error: Unsupported number of commands.\n");
             }
         }
+        else if (command_counter == 0)
+        {
+            fprintf(stderr, "No command entered.\n");
+        }
+        /***********************************************************************/
     }
 
     return 0;
